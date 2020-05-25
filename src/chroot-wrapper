@@ -1,0 +1,540 @@
+#!/bin/bash
+# Wrapper script for chroot to set up namespaces and control groups before chrooting
+#
+# Copyright 2020 Patrick McLean <chutzpah@gentoo.org>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+#
+
+# namespaces to use by default
+DEFAULT_NAMESPACES=(
+	uts
+	ipc
+	mount
+	cgroup
+)
+
+# bind mounts to create by default
+declare -A DEFAULT_MOUNTS=(
+	[/proc]=':rbind'
+	[/sys]=':rbind'
+	[/dev]=':rbind'
+	[*/var/portage/repos/gentoo]=''
+	[*/var/portage/repos/gentoo]='/var/db/repos/gentoo:rbind'
+)
+
+# tmpfs mounts to create by default
+DEFAULT_TMPFS_MOUNTS=(
+	/tmp
+	/run
+)
+
+# default name of the control group to use
+DEFAULT_CGROUP_NAME="chroot-wrapper"
+
+# cgroup controllers to enable (if supported)
+DEFAULT_CGROUP_CONTROLLERS=(
+	cpu
+	blkio
+	cpuacct
+	memory
+)
+
+show_usage() {
+	printf 'Usage: %s [OPTIONS] <PATH> [COMMAND]\n' "${progname}"
+	printf 'Wrapper for chroot that sets up bind mounts, control groups and tmpfs\n'
+	printf 'mounts before chrooting. Can run a shell, or a command. Uses namespaces\n'
+	printf 'to isoloate the chroot from the host system.\n\n'
+	printf 'By default /proc /sys and /dev are bind mounted in to the chroot and the\n'
+	printf 'Process is run in separate namespaces: %s\n\n' "${DEFAULT_NAMESPACES[*]}"
+	printf '  -b --bind-mount <MOUNT>       Add a bind mount to the chroot. Format is:\n'
+	printf '                                [source]:[target]:[options]\n'
+	printf '                                Options are passed to mount with -o. The\n'
+	printf '                                target is relative to the chroot directory.\n'
+	printf '                                Can be specified multiple times.\n\n'
+	printf '  -c --cgroup <NAME>            The name of the control group to use\n\n'
+	printf '  -e --env <NAME>               Forward environment variable NAME\n\n'
+	printf '  -n --extra-namespace <NAME>   Create a new namespace of the given type in\n\n'
+	printf '                                addition to the default namespaces.\n\n'
+	printf '  -u -- extra-unshare-arg <ARG> Pass additional argument to the unshare\n'
+	printf '                                command\n\n'
+	printf '  -h --help                     Show this help and exit.\n\n'
+	printf '  -n --hostname <NAME>          Set hostname to NAME in the namespace. Will\n'
+	printf '                                be ignored if uts namespaces are not\n'
+	printf '                                supported\n\n'
+	printf '  -k --keepenv                  Keep the environment of the calling process.\n'
+	printf '                                Without this option, the environment will be\n'
+	printf '                                discarded.\n\n'
+	printf "  -o --omit-namespace <NAME>    Don't use a separate namespace for the given\\n"
+	printf '                                namespace type.\n\n'
+	printf '  -s --shellopts                Pass SHELLOPTS environment variable in.\n\n'
+	printf '  -t --tmpfs <PATH>             Mount over the given path with an empty tmpfs\n'
+	printf '                                This is done before any bind mounts, and non\n'
+	printf '                                existant target paths that are under a tmpfs\n'
+	printf '                                mount will be automatically created\n'
+}
+
+parse_args() {
+	local -A longoptions=(
+		[bind-mount:]=b
+		[cgroup:]=c
+		[env:]=e
+		[extra-namespace:]=E
+		[extra-unshare-arg:]=u
+		[help]=h
+		[hostname:]=n
+		[keepenv]=k
+		[omit-namespace:]=o
+		[shellopts]=s
+		[tmpfs:]=t
+	)
+
+	# prepare our option parameters
+	local longopt opt opts longopts
+	for longopt in "${!longoptions[@]}"; do
+		local opt=${longoptions[${longopt}]}
+		if [[ -n ${opt} ]]; then
+			[[ ${longopt} =~ ^.+:{1,}$ ]] && opt=${opt}${longopt##*:}:
+			opts+=${opt}
+		fi
+		longopts+=${longopt},
+	done
+
+	local args
+	if ! args=$(getopt -o "+${opts}" -l "${longopts%,}" -n "${progname}" -- "${@}"); then
+		show_usage
+		return 255
+	fi
+
+	eval set -- "${args}"
+	while [[ ${#} -gt 0 ]]; do
+		case ${1} in
+			--bind-mount|-b)
+				local path="${2%%:*}"
+				if [[ ! -e ${path} ]]; then
+					printf '%s: Mountpoint souce path "%s" does not exist\n' "${progname}" "${path}" >&2
+					return 1
+				fi
+	
+				bind_mounts["${path}"]=${2#*:}
+				shift
+			;;
+			--env|-e) env_vars+=("${2}"); shift;;
+			--extra-namespace|-E) extra_namespaces+=("${2}"); shift;;
+			--extra-unshare-arg|-u) extra_unshare_args+=("${2}"); shift;;
+			--help|-h)
+				show_usage
+				exit 0
+			;;
+			--hostname|-n) 
+				if [[ ${2} == -* ]]; then
+					printf '%s: Invalid hostname "%s": Must not start with a "-"\n' \
+						"${progname}" "${2}" >&2
+					return 1
+				elif [[ ${2} == *.* ]]; then
+					printf '%s: Invalid hostname "%s": Must not contain "."\n' \
+						"${progname}" "${2}" >&2
+					return 1
+				fi
+				hostname="${2}";
+				shift
+			;;
+			--keepenv|-k) keepenv=1;;
+			--cgroup|-c) cgroup_name="${2}"; shift;;
+			--omit-namespace|-o)
+				if [[ ${2} == mount ]]; then
+					printf '%s: Mount namespace cannot be omitted\n' "${progname}" >&2
+					return 1
+				fi
+
+				omit_namespaces["${2}"]=1
+				shift
+			;;
+			--shellopts|-s) shellopts=1;;
+			--tmpfs|-t) tmpfs+=("${2}"); shift;;
+			--) 
+				chroot_path=${2}
+				shift 2
+				while [[ ${1} == -- ]]; do shift; done
+
+				subcommand=("${@}")
+				break
+			;;
+			-*)
+				printf -- '%s: Unknown option "%s"\n' "${progname}" "${1}" >&2
+				show_usage >&2
+				return 1
+			;;
+			*)
+				chroot_path=${1}
+				shift
+	
+				subcommand=("${@}")
+				break
+			;;
+		esac
+		shift
+	done
+
+	# some initial argument checks
+	if [[ -z ${chroot_path} ]]; then
+		printf '%s: Path to chroot to not provided\n' "${progname}" >&2
+		return 1
+	elif [[ ! -d ${chroot_path} ]]; then
+		printf '%s: Provided path "%s" does not exist\n' "${progname}" "${chroot_path}" >&2
+		return 1
+	fi
+}
+
+parse_namespaces() {
+	local -a namespace_list
+
+	# shellcheck disable=SC2153
+	# NAMESPACES is expected to be set in the config file
+	if [[ -n ${NAMESPACES[*]} ]]; then
+		namespace_list=("${NAMESPACES[@]}")
+	else
+		namespace_list=("${DEFAULT_NAMESPACES[@]}")
+	fi
+
+	for namespace in "${namespace_list[@]}" "${extra_namespaces[@]}"; do
+		[[ -n ${omit_namespaces["${namespace}"]} ]] && continue
+
+		# make sure the namespace is supported
+		if unshare "--${namespace}" -- true &>/dev/null; then
+			namespaces["${namespace}"]=1
+		elif [[ ${namespace} == mount ]]; then
+			printf '%s: The mount namespace does not appear to be supported, aborting\n' "${progname}" >&2
+			return 1
+		fi
+	done
+}
+
+call_unshare() {
+	local -a unshare_params
+
+	readarray -d '' -t unshare_params < <(printf -- '--%s\0' "${!namespaces[@]}") || return
+
+	local arg
+	for arg in "${extra_unshare_args[@]}"; do
+		if unshare "${unshare_params[@]}" "${arg}" -- true &>/dev/null; then
+			printf '%s: Argument "%s" unsupported by unshare, aborting\n' "${progname}" "${arg}" >&2
+			return 1
+		fi
+	done
+
+	local -a bash_args
+
+	exec env _CHROOT_WRAPPER_CALLED_UNSHARE=1 SHELLOPTS="${SHELLOPTS}" unshare "${unshare_params[@]}" "${extra_unshare_args[@]}" -- \
+		"${BASH}" "${bash_args[@]}" -- "${BASH_SOURCE[0]}" "${@}"
+}
+
+initialize_mounts() {
+	# initialize the bind_mounts associate array with the "default" mounts
+	# list that comes from a config file, or the environment
+	local mounts_type mount
+
+	# shellcheck disable=SC2153
+	# expected to come from env or config file
+	if mounts_type=$(declare -p MOUNTS &>/dev/null); then
+		mounts_type=${mounts_type#declare }
+		case "${mounts_type}" in
+			-A*)
+				for mount in "${!MOUNTS[@]}"; do
+					mounts[${mount}]=${MOUNTS[${mount}]}
+				done
+			;;
+			-a*)
+				for mount in "${MOUNTS[@]}"; do
+					mounts[${mount}]=1
+				done
+			;;
+			--*|-x*)
+				# if the MOUNTS variable is a scalar or environment variable, treat as an
+				# addition to the DEFAULT_MOUNTS list rather than a replacement
+				for mount in "${!DEFAULT_MOUNTS[@]}"; do
+					mounts[${mount}]=${DEFAULT_MOUNTS[${mount}]}
+				done
+
+				local -a mounts_var
+				read -ar mounts_var <<< "${MOUNTS}" || return
+				for mount in "${mounts_var[@]}"; do
+					mounts[${mount}]=1
+				done
+			;;
+		esac
+	else
+		for mount in "${!DEFAULT_MOUNTS[@]}"; do
+			mounts[${mount}]=${DEFAULT_MOUNTS[${mount}]}
+		done
+	fi
+
+	# add in cli provided bind mounts at the end
+	for mount in "${!bind_mounts[@]}"; do
+		mounts[${mount}]=${bind_mounts[${mount}]}
+	done
+
+	# shellcheck disable=SC2153
+	# expected to come from config file
+	if [[ -n ${TMPFS_MOUNTS[*]} ]]; then
+		for mount in "${TMPFS_MOUNTS[@]}"; do
+			tmpfs_mounts["${mount}"]=1
+		done
+	else
+		for mount in "${DEFAULT_TMPFS_MOUNTS[@]}"; do
+			tmpfs_mounts["${mount}"]=1
+		done
+	fi
+
+	# passed on command line
+	for mount in "${tmpfs[@]}"; do
+		tmpfs_mounts[${mount}]=1
+	done
+
+	# if we are mounting over the SSH_AUTH_SOCK path, then bind mount it's
+	# containing directory in to the chroot
+	if [[ -n ${SSH_AUTH_SOCK} && -S ${SSH_AUTH_SOCK} ]]; then
+		local sock_path="${SSH_AUTH_SOCK%/*}"
+
+		for mount in "${!tmpfs_mounts[@]}"; do
+			if [[ ${sock_path} == ${mount%/}/* ]]; then
+				mounts[${sock_path}]=${sock_path}
+				break
+			fi
+		done
+	elif [[ -z ${keepenv} ]]; then
+		unset SSH_AUTH_SOCK
+	fi
+}
+
+setup_mounts() {
+	# MS_PRIVATE is the kernel mount default, but systemd explicitly
+	# sets it to MS_SHARED, which prevents the earlier unshare call
+	# from working as intended. Therefore, we have to explicitly
+	# make relevant mounts private.
+	mount --make-rprivate / || return
+
+	# do tmpfs mounts first
+	local target
+	for target in "${!tmpfs_mounts[@]}"; do
+		mount -t tmpfs none "${chroot_path}${target}" || return
+	done
+
+	local source_path
+	for source_path in "${!mounts[@]}"; do
+		local target_value target mount_opts optional
+		target_value=${mounts[${source_path}]}
+	
+		if [[ ${source_path} == '*'* ]]; then
+			optional=1
+			source_path=${source_path#\*}
+		fi
+
+		target=${chroot_path}${target_value%:*}
+		mount_opts=${target_value#*:}
+	
+		# if there are no options passed, then reflect it
+		if [[ ${mount_opts} == "${target_value}" ]]; then
+			mount_opts="bind"
+		else
+			# make sure bind is in the mount options
+			mount_opts=bind,${mount_opts}
+		fi
+
+		# if no target path is give, assume it's the same as the source
+		[[ ${target} == "${chroot_path}" ]] && target+=${source_path}
+
+		if [[ ! -e ${target} ]]; then
+			# if the target doesn't exist, and it's path is under a tmpfs mount
+			# then create it, otherwise bomb
+			local tmpfs in_tmpfs target_path=${target#${chroot_path}}
+	
+			for tmpfs in "${!tmpfs_mounts[@]}"; do
+				in_tmpfs=1
+				if [[ ${target_path} == ${tmpfs%/}/* ]]; then
+					if [[ -d ${source_path} ]]; then
+						mkdir -p "${target}" || return
+					elif [[ -f ${source_path} ]]; then
+						mkdir -p "${target%%/*}" || return
+						touch "${target}" || return
+					else
+						printf '%s: Source path object type "%s" cannout be bind mounted\n' \
+							"${progname}" "${source_path}" >&2
+						return 1
+					fi
+				fi
+			done
+			if [[ -z ${in_tmpfs} && -z ${optional} ]]; then
+				printf '%s: Mount target path "%s" does not exist\n' "${progname}" "${target}" >&2
+				return 1
+			elif [[ -z ${in_tmpfs} && -n ${optional} ]]; then
+				continue
+			fi
+		fi
+
+		if ! mount -o "${mount_opts}" "${source_path}" "${target}" ; then
+			printf '%s: Failed to mount "%s" on "%s", aborting\n' \
+				"${progname}" "${source_path}" "${target}" >&2
+			return 1
+		fi
+	done
+}
+
+setup_cgroups() {
+	: "${cgroup_name:=${CGROUP_NAME:-${DEFAULT_CGROUP_NAME}}}"
+
+	# TODO: what does systemd do?
+	local cgroup_root="/sys/fs/cgroup/unified"
+	if [[ ! -d ${cgroup_root} ]] || ! mountpoint --quiet "${cgroup_root}"; then
+		return 0
+	fi
+
+	local cgroup_path=${cgroup_root}${cgroup_name}
+
+	# create control group if it doesn't exist
+	if [[ ! -d ${cgroup_path} ]]; then
+		mkdir "${cgroup_path}" || return
+	fi
+
+	# add ourselves to the new control group
+	printf '%s\n' "$$" > "${cgroup_path}/cgroup.procs" || return
+
+	local -a cgroup_controllers
+	# shellcheck disable=SC2153
+	# expected to come from env or config file
+	if [[ -n ${CGROUP_CONTROLLERS[*]} ]]; then
+		cgroup_controllers=("${CGROUP_CONTROLLERS[@]}")
+	else
+		cgroup_controllers=("${DEFAULT_CGROUP_CONTROLLERS[@]}")
+	fi
+
+	# enable controllers
+	printf '+%s ' "${cgroup_controllers[@]}" > "${cgroup_path}/cgroup.subtree_control"
+
+	local controller
+	for controller in "${cgroup_controllers[@]}"; do
+		if declare -f "configure_${controller}_controller" >/dev/null; then
+			("configure_${controller}_controller" "${cgroup_path}") || return
+		fi
+	done
+}
+
+setup_misc() {
+	# set the hostname if we have the uts namespace
+	if [[ -n ${namespaces[uts]:+x} ]]; then
+		command hostname "${hostname:=${chroot_path##*/}}" || return
+	fi
+}
+
+run_chroot() {
+	local -a env_command
+
+	if ! env_command+=("$(command -v env)") >/dev/null; then
+		printf '%s: Could not find "env" command\n' "${progname}" >&2
+		return 1
+	elif [[ ! -x ${chroot_path}${env_command[0]} ]]; then
+		printf '%s: Could not find "%s" in chroot\n' "${progname}" "${env_command[0]}" >&2
+		return 1
+	fi
+
+	[[ -z ${keepenv} ]] && env_command+=("--ignore-environment")
+
+	env_command+=( CHROOT="${hostname}" )
+	[[ -n ${shellopts} ]] && env_command+=(SHELLOPTS="${SHELLOPTS}")
+
+	if [[ -z ${keepenv} ]]; then
+		env_command+=(
+			HOME="${HOME}"
+			TERM="${TERM}"
+			PATH="${PATH}"
+		)
+		[[ -n ${SSH_AUTH_SOCK} ]] && env_command+=(SSH_AUTH_SOCK="${SSH_AUTH_SOCK}")
+	fi
+
+	# forward in specified environment variables
+	local env_var
+	for env_var in "${env_vars[@]}"; do
+		[[ -n ${!env_var} ]] && env_command+=("${env_var}=${!env_var}")
+	done
+	
+	local chroot_cmd
+	if ! chroot_cmd+=("$(command -v chroot)"); then
+		printf '%s: Could not find chroot command, aborting\n' "${progname}" > %2
+		return 1
+	fi
+
+	local shell
+	if [[ -x ${chroot_path}${SHELL} ]]; then
+		shell=${SHELL}
+	elif [[ -x ${chroot_path}${BASH} ]]; then
+		shell=${BASH}
+	elif [[ -r /etc/shells ]]; then
+		for shell in $(</etc/shells); do
+			[[ -x ${chroot_path}${shell} ]] && break
+		done
+	elif [[ -x ${chroot_path}/bin/sh ]]; then
+		shell="/bin/sh"
+	fi
+	if [[ -z ${subcommand[*]} ]]; then
+		if [[ -z ${shell} ]]; then
+			printf '%s: Could not find any usable shell under "%s", and command not provided\n' \
+				"${progname}" "${chroot_path}" >&2
+			return 1
+		fi
+		subcommand=("${shell}" -l)
+	fi
+
+	# if no command provided, run a login shell
+	[[ -z ${subcommand[*]} ]] && subcommand=("${shell}" -l)
+
+	exec "${chroot_cmd[@]}" "${chroot_path}" "${env_command[@]}" "${subcommand[@]}"
+}
+
+main() {
+	local progname
+	progname=${0}
+
+	shopt -s nullglob
+	shopt -so pipefail
+
+	# these get set in parse_args
+	local chroot_path hostname cgroup_name keepenv shellopts
+	local -a subcommand 
+	local -a env_vars extra_namespaces extra_unshare_args tmpfs
+	local -A bind_mounts omit_namespaces
+
+	parse_args "${@}" || return
+
+	local -A namespaces
+	parse_namespaces || return
+
+	# call unshare if needed
+	if [[ -z ${_CHROOT_WRAPPER_CALLED_UNSHARE} ]]; then
+		call_unshare "${@}" || return
+	fi
+	# clean up environment
+	export -n _CHROOT_WRAPPER_CALLED_UNSHARE SHELLOPTS || return
+	
+	local -A mounts tmpfs_mounts
+	initialize_mounts || return
+
+	setup_cgroups || return
+	setup_mounts || return
+	setup_misc || return
+	run_chroot || return
+}
+
+if ! return 0 &>/dev/null; then
+	main "${@}" || exit
+fi
