@@ -445,7 +445,7 @@ setup_misc() {
 run_chroot() {
 	local -a env_command
 
-	if ! env_command+=("$(command -v env)") >/dev/null; then
+	if ! env_command+=("$(command -pv env)") >/dev/null; then
 		printf '%s: Could not find "env" command\n' "${progname}" >&2
 		return 1
 	elif [[ ! -x ${chroot_path}${env_command[0]} ]]; then
@@ -474,7 +474,7 @@ run_chroot() {
 	done
 	
 	local chroot_cmd
-	if ! chroot_cmd+=("$(command -v chroot)"); then
+	if ! chroot_cmd+=("$(command -pv chroot)"); then
 		printf '%s: Could not find chroot command, aborting\n' "${progname}" > %2
 		return 1
 	fi
