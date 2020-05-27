@@ -222,6 +222,12 @@ parse_namespaces() {
 }
 
 call_unshare() {
+	# make sure we haven't already called unshare
+	if [[ -n ${_CHROOT_WRAPPER_CALLED_UNSHARE} ]]; then
+		export -n _CHROOT_WRAPPER_CALLED_UNSHARE SHELLOPTS || return
+		return 0
+	fi
+
 	local -a unshare_params
 
 	readarray -d '' -t unshare_params < <(printf -- '--%s\0' "${!namespaces[@]}") || return
@@ -234,10 +240,9 @@ call_unshare() {
 		fi
 	done
 
-	local -a bash_args
-
-	exec env _CHROOT_WRAPPER_CALLED_UNSHARE=1 SHELLOPTS="${SHELLOPTS}" unshare "${unshare_params[@]}" "${extra_unshare_args[@]}" -- \
-		"${BASH}" "${bash_args[@]}" -- "${BASH_SOURCE[0]}" "${@}"
+	exec env _CHROOT_WRAPPER_CALLED_UNSHARE=1 SHELLOPTS="${SHELLOPTS}" \
+		unshare "${unshare_params[@]}" "${extra_unshare_args[@]}" -- \
+		"${BASH}" -- "${BASH_SOURCE[0]}" "${@}"
 }
 
 initialize_mounts() {
@@ -520,11 +525,7 @@ main() {
 	parse_namespaces || return
 
 	# call unshare if needed
-	if [[ -z ${_CHROOT_WRAPPER_CALLED_UNSHARE} ]]; then
-		call_unshare "${@}" || return
-	fi
-	# clean up environment
-	export -n _CHROOT_WRAPPER_CALLED_UNSHARE SHELLOPTS || return
+	call_unshare "${@}" || return
 	
 	local -A mounts tmpfs_mounts
 	initialize_mounts || return
