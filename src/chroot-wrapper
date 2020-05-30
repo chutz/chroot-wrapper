@@ -198,6 +198,17 @@ parse_args() {
 }
 
 parse_namespaces() {
+	local namespace
+
+	# let's not retest all the namespaces after we have run unshare
+	if [[ -n ${_CHROOT_WRAPPER_NAMESPACES} ]]; then
+		while read -d ' ' -r namespace; do
+			namespaces[${namespace}]=1
+		done <<< "${_CHROOT_WRAPPER_NAMESPACES} "
+
+		return 0
+	fi
+
 	local -a namespace_list
 
 	# shellcheck disable=SC2153
@@ -224,7 +235,8 @@ parse_namespaces() {
 call_unshare() {
 	# make sure we haven't already called unshare
 	if [[ -n ${_CHROOT_WRAPPER_CALLED_UNSHARE} ]]; then
-		export -n _CHROOT_WRAPPER_CALLED_UNSHARE SHELLOPTS || return
+		# clean up the exports so these don't get passed to the command
+		export -n _CHROOT_WRAPPER_CALLED_UNSHARE _CHROOT_WRAPPER_NAMESPACES SHELLOPTS || return
 		return 0
 	fi
 
@@ -240,7 +252,8 @@ call_unshare() {
 		fi
 	done
 
-	exec env _CHROOT_WRAPPER_CALLED_UNSHARE=1 SHELLOPTS="${SHELLOPTS}" \
+	exec env SHELLOPTS="${SHELLOPTS}" _CHROOT_WRAPPER_CALLED_UNSHARE=1 \
+		_CHROOT_WRAPPER_NAMESPACES="${!namespaces[*]}" \
 		unshare "${unshare_params[@]}" "${extra_unshare_args[@]}" -- \
 		"${BASH}" -- "${BASH_SOURCE[0]}" "${@}"
 }
