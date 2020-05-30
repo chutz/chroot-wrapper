@@ -219,11 +219,16 @@ parse_namespaces() {
 		namespace_list=("${DEFAULT_NAMESPACES[@]}")
 	fi
 
+	if ! unshare="$(command -vp unshare)"; then
+		printf '%s: Could not find "unshare" command, please make sure it is in PATH\n' "${progname}"
+		return 1
+	fi
+
 	for namespace in "${namespace_list[@]}" "${extra_namespaces[@]}"; do
 		[[ -n ${omit_namespaces["${namespace}"]} ]] && continue
 
 		# make sure the namespace is supported
-		if unshare "--${namespace}" -- true &>/dev/null; then
+		if "${unshare}" "--${namespace}" -- true &>/dev/null; then
 			namespaces["${namespace}"]=1
 		elif [[ ${namespace} == mount ]]; then
 			printf '%s: The mount namespace does not appear to be supported, aborting\n' "${progname}" >&2
@@ -246,15 +251,21 @@ call_unshare() {
 
 	local arg
 	for arg in "${extra_unshare_args[@]}"; do
-		if unshare "${unshare_params[@]}" "${arg}" -- true &>/dev/null; then
+		if "${unshare}" "${unshare_params[@]}" "${arg}" -- true &>/dev/null; then
 			printf '%s: Argument "%s" unsupported by unshare, aborting\n' "${progname}" "${arg}" >&2
 			return 1
 		fi
 	done
+	
+	local env
+	if ! env=$(command -vp env); then
+		printf '%s: Could not find "env" command, please make sure it is in PATH\n' "${progname}"
+		return 1
+	fi
 
-	exec env SHELLOPTS="${SHELLOPTS}" _CHROOT_WRAPPER_CALLED_UNSHARE=1 \
+	exec "${env}" SHELLOPTS="${SHELLOPTS}" _CHROOT_WRAPPER_CALLED_UNSHARE=1 \
 		_CHROOT_WRAPPER_NAMESPACES="${!namespaces[*]}" \
-		unshare "${unshare_params[@]}" "${extra_unshare_args[@]}" -- \
+		"${unshare}" "${unshare_params[@]}" "${extra_unshare_args[@]}" -- \
 		"${BASH}" -- "${BASH_SOURCE[0]}" "${@}"
 }
 
@@ -534,6 +545,7 @@ main() {
 
 	parse_args "${@}" || return
 
+	local unshare
 	local -A namespaces
 	parse_namespaces || return
 
