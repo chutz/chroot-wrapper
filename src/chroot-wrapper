@@ -348,16 +348,23 @@ initialize_mounts() {
 }
 
 setup_mounts() {
+	local mount_cmd
+
+	if ! mount_cmd=$(command -vp mount); then
+		printf '%s: Could not find the "mount" command, please make sure it is in PATH\n' "${progname}"
+		return 1
+	fi
+
 	# MS_PRIVATE is the kernel mount default, but systemd explicitly
 	# sets it to MS_SHARED, which prevents the earlier unshare call
 	# from working as intended. Therefore, we have to explicitly
 	# make relevant mounts private.
-	mount --make-rprivate / || return
+	"${mount_cmd}" --make-rprivate / || return
 
 	# do tmpfs mounts first
 	local target
 	for target in "${!tmpfs_mounts[@]}"; do
-		mount -t tmpfs none "${chroot_path}${target}" || return
+		"${mount_cmd}" -t tmpfs none "${chroot_path}${target}" || return
 	done
 
 	local source_path
@@ -412,7 +419,7 @@ setup_mounts() {
 			fi
 		fi
 
-		if ! mount -o "${mount_opts}" "${source_path}" "${target}" ; then
+		if ! "${mount_cmd}" -o "${mount_opts}" "${source_path}" "${target}" ; then
 			printf '%s: Failed to mount "%s" on "%s", aborting\n' \
 				"${progname}" "${source_path}" "${target}" >&2
 			return 1
