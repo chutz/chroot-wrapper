@@ -30,8 +30,6 @@ declare -A DEFAULT_MOUNTS=(
 	[/proc]=':rbind'
 	[/sys]=':rbind'
 	[/dev]=':rbind'
-	[*/var/portage/repos/gentoo]=''
-	[*/var/portage/repos/gentoo]='/var/db/repos/gentoo:rbind'
 )
 
 # tmpfs mounts to create by default
