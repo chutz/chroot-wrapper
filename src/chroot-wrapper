@@ -21,8 +21,12 @@
 DEFAULT_NAMESPACES=(
 	uts
 	ipc
-	mount
 	cgroup
+)
+
+# namespaces that are force, these are always enabled
+FORCE_NAMESPACES=(
+	mount
 )
 
 # bind mounts to create by default
@@ -209,12 +213,15 @@ parse_namespaces() {
 
 	local -a namespace_list
 
+	# we always want these namespaces
+	namespace_list=("${FORCE_NAMESPACES[@]}")
+
 	# shellcheck disable=SC2153
 	# NAMESPACES is expected to be set in the config file
 	if [[ -n ${NAMESPACES[*]} ]]; then
-		namespace_list=("${NAMESPACES[@]}")
+		namespace_list+=("${NAMESPACES[@]}")
 	else
-		namespace_list=("${DEFAULT_NAMESPACES[@]}")
+		namespace_list+=("${DEFAULT_NAMESPACES[@]}")
 	fi
 
 	if ! unshare="$(command -vp unshare)"; then
