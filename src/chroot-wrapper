@@ -141,7 +141,7 @@ parse_args() {
 					printf '%s: Mountpoint souce path "%s" does not exist\n' "${progname}" "${path}" >&2
 					return 1
 				fi
-	
+
 				bind_mounts["${path}"]=${2#*:}
 				shift
 			;;
@@ -154,7 +154,7 @@ parse_args() {
 				show_usage
 				exit 0
 			;;
-			--hostname|-n) 
+			--hostname|-n)
 				if [[ ${2} == -* ]]; then
 					printf '%s: Invalid hostname "%s": Must not start with a "-"\n' \
 						"${progname}" "${2}" >&2
@@ -179,7 +179,7 @@ parse_args() {
 			;;
 			--shellopts|-s) shellopts=1;;
 			--tmpfs|-t) tmpfs+=("${2}"); shift;;
-			--) 
+			--)
 				chroot_path=${2}
 				shift 2
 				while [[ ${1} == -- ]]; do shift; done
@@ -195,7 +195,7 @@ parse_args() {
 			*)
 				chroot_path=${1}
 				shift
-	
+
 				subcommand=("${@}")
 				break
 			;;
@@ -281,7 +281,7 @@ call_unshare() {
 			return 1
 		fi
 	done
-	
+
 	local env
 	if ! env=$(command -vp env); then
 		printf '%s: Could not find "env" command, please make sure it is in PATH\n' "${progname}"
@@ -396,7 +396,7 @@ setup_mounts() {
 	for source_path in "${!mounts[@]}"; do
 		local target_value target mount_opts optional
 		target_value=${mounts[${source_path}]}
-	
+
 		if [[ ${source_path} == '*'* ]]; then
 			optional=1
 			source_path=${source_path#\*}
@@ -404,7 +404,7 @@ setup_mounts() {
 
 		target=${chroot_path}${target_value%:*}
 		mount_opts=${target_value#*:}
-	
+
 		# if there are no options passed, then reflect it
 		if [[ ${mount_opts} == "${target_value}" ]]; then
 			mount_opts="bind"
@@ -420,7 +420,7 @@ setup_mounts() {
 			# if the target doesn't exist, and it's path is under a tmpfs mount
 			# then create it, otherwise bomb
 			local tmpfs in_tmpfs target_path=${target#${chroot_path}}
-	
+
 			for tmpfs in "${!tmpfs_mounts[@]}"; do
 				in_tmpfs=1
 				if [[ ${target_path} == ${tmpfs%/}/* ]]; then
@@ -531,7 +531,7 @@ run_chroot() {
 	for env_var in "${env_vars[@]}"; do
 		[[ -n ${!env_var} ]] && env_command+=("${env_var}=${!env_var}")
 	done
-	
+
 	local chroot_cmd
 	if ! chroot_cmd+=("$(command -pv chroot)"); then
 		printf '%s: Could not find chroot command, aborting\n' "${progname}" > %2
@@ -574,7 +574,7 @@ main() {
 
 	# these get set in parse_args
 	local chroot_path hostname cgroup_name keepenv shellopts config_file
-	local -a subcommand 
+	local -a subcommand
 	local -a env_vars extra_namespaces extra_unshare_args tmpfs
 	local -A bind_mounts omit_namespaces
 
@@ -587,7 +587,7 @@ main() {
 
 	# call unshare if needed
 	call_unshare "${@}" || return
-	
+
 	local -A mounts tmpfs_mounts
 	initialize_mounts || return
 
