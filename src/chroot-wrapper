@@ -486,9 +486,12 @@ setup_cgroups() {
 }
 
 setup_misc() {
+	# hostname defaults to the basename of the chroot
+	: "${hostname:=${chroot_path##*/}}"
+
 	# set the hostname if we have the uts namespace
 	if [[ -n ${namespaces[uts]:+x} ]]; then
-		command hostname "${hostname:=${chroot_path##*/}}" || return
+		command hostname --file <(printf '%s\n' "${hostname}") || return
 	fi
 }
 
