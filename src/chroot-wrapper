@@ -54,37 +54,51 @@ DEFAULT_CGROUP_CONTROLLERS=(
 )
 
 show_usage() {
-	printf 'Usage: %s [OPTIONS] <PATH> [COMMAND]\n' "${progname}"
-	printf 'Wrapper for chroot that sets up bind mounts, control groups and tmpfs\n'
-	printf 'mounts before chrooting. Can run a shell, or a command. Uses namespaces\n'
-	printf 'to isoloate the chroot from the host system.\n\n'
-	printf 'By default /proc /sys and /dev are bind mounted in to the chroot and the\n'
-	printf 'Process is run in separate namespaces: %s\n\n' "${DEFAULT_NAMESPACES[*]}"
-	printf '  -b --bind-mount <MOUNT>       Add a bind mount to the chroot. Format is:\n'
-	printf '                                [source]:[target]:[options]\n'
-	printf '                                Options are passed to mount with -o. The\n'
-	printf '                                target is relative to the chroot directory.\n'
-	printf '                                Can be specified multiple times.\n\n'
-	printf '  -c --cgroup <NAME>            The name of the control group to use\n\n'
-	printf '  -e --env <NAME>               Forward environment variable NAME\n\n'
-	printf '  -n --extra-namespace <NAME>   Create a new namespace of the given type in\n\n'
-	printf '                                addition to the default namespaces.\n\n'
-	printf '  -u -- extra-unshare-arg <ARG> Pass additional argument to the unshare\n'
-	printf '                                command\n\n'
-	printf '  -h --help                     Show this help and exit.\n\n'
-	printf '  -n --hostname <NAME>          Set hostname to NAME in the namespace. Will\n'
-	printf '                                be ignored if uts namespaces are not\n'
-	printf '                                supported\n\n'
-	printf '  -k --keepenv                  Keep the environment of the calling process.\n'
-	printf '                                Without this option, the environment will be\n'
-	printf '                                discarded.\n\n'
-	printf "  -o --omit-namespace <NAME>    Don't use a separate namespace for the given\\n"
-	printf '                                namespace type.\n\n'
-	printf '  -s --shellopts                Pass SHELLOPTS environment variable in.\n\n'
-	printf '  -t --tmpfs <PATH>             Mount over the given path with an empty tmpfs\n'
-	printf '                                This is done before any bind mounts, and non\n'
-	printf '                                existant target paths that are under a tmpfs\n'
-	printf '                                mount will be automatically created\n'
+	cat <<EOF
+Usage: ${progname} [OPTIONS] <PATH> [COMMAND]
+Wrapper for chroot that sets up bind mounts, control groups and tmpfs
+mounts before chrooting. Can run a shell, or a command. Uses namespaces
+to isoloate the chroot from the host system.
+
+By default /proc /sys and /dev are bind mounted in to the chroot and the
+Process is run in separate namespaces: ${DEFAULT_NAMESPACES[*]}
+
+  -b --bind-mount <MOUNT>       Add a bind mount to the chroot. Format is:
+                                [source]:[target]:[options]
+                                Options are passed to mount with -o. The
+                                target is relative to the chroot directory.
+                                Can be specified multiple times.
+
+  -c --cgroup <NAME>            The name of the control group to use.
+
+  -e --env <NAME>               Forward environment variable NAME.
+
+  -n --extra-namespace <NAME>   Create a new namespace of the given type in
+                                addition to the default namespaces.
+
+  -u -- extra-unshare-arg <ARG> Pass additional argument to the unshare
+                                command.
+
+  -h --help                     Show this help and exit.
+
+  -n --hostname <NAME>          Set hostname to NAME in the namespace. Will
+                                be ignored if uts namespaces are not
+                                supported.
+
+  -k --keepenv                  Keep the environment of the calling process.
+                                Without this option, the environment will be
+                                discarded.
+
+  -o --omit-namespace <NAME>    Don't use a separate namespace for the given
+                                namespace type.
+
+  -s --shellopts                Pass SHELLOPTS environment variable in.
+
+  -t --tmpfs <PATH>             Mount over the given path with an empty tmpfs
+                                This is done before any bind mounts, and non
+                                existant target paths that are under a tmpfs
+                                mount will be automatically created.
+EOF
 }
 
 parse_args() {
