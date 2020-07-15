@@ -334,6 +334,10 @@ initialize_mounts() {
 		done
 	fi
 
+	for mount in "${!EXTRA_MOUNTS[@]}"; do
+		mounts[${mount}]=${EXTRA_MOUNTS[${mount}]}
+	done
+
 	# add in cli provided bind mounts at the end
 	for mount in "${!bind_mounts[@]}"; do
 		mounts[${mount}]=${bind_mounts[${mount}]}
@@ -579,6 +583,8 @@ main() {
 	local -A bind_mounts omit_namespaces
 
 	parse_args "${@}" || return
+
+	local -A EXTRA_MOUNTS
 	source_config_file || return
 
 	local unshare

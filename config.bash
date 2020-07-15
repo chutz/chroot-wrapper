@@ -5,10 +5,15 @@
 # this is a bach associative array, the key is the path on the host, the
 # value is the path in the chroot (blank means the same as the host) then
 # a colon and any mount options to pass
+# this *replaces* the default list
 #declare -A DEFAULT_MOUNTS=(
 #	[/proc]=':rbind'
 #	[/sys]=':rbind'
 #	[/dev]=':rbind'
+#)
+
+# extra paths to bind mount from the host, these are added to the default list
+#declare -A EXTRA_MOUNTS=(
 #)
 
 # paths to mount tmpfs within the mount namespace
