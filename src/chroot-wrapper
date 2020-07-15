@@ -146,6 +146,7 @@ parse_args() {
 				bind_mounts["${path}"]=${2#*:}
 				shift
 			;;
+			--cgroup|-c) cgroup_name="${2}"; shift;;
 			--env|-e) env_vars+=("${2}"); shift;;
 			--extra-namespace|-E) extra_namespaces+=("${2}"); shift;;
 			--extra-unshare-arg|-u) extra_unshare_args+=("${2}"); shift;;
@@ -167,7 +168,6 @@ parse_args() {
 				shift
 			;;
 			--keepenv|-k) keepenv=1;;
-			--cgroup|-c) cgroup_name="${2}"; shift;;
 			--omit-namespace|-o)
 				if [[ ${2} == mount ]]; then
 					printf '%s: Mount namespace cannot be omitted\n' "${progname}" >&2
