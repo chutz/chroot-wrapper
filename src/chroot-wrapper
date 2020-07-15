@@ -18,40 +18,38 @@
 #
 
 # namespaces to use by default
-DEFAULT_NAMESPACES=(
+declare -r DEFAULT_NAMESPACES=(
 	uts
 	ipc
 	cgroup
 )
 
 # namespaces that are force, these are always enabled
-FORCE_NAMESPACES=(
+declare -r FORCE_NAMESPACES=(
 	mount
 )
 
 # bind mounts to create by default
-declare -A DEFAULT_MOUNTS=(
+declare -rA DEFAULT_MOUNTS=(
 	[/proc]=':rbind'
 	[/sys]=':rbind'
 	[/dev]=':rbind'
 )
 
 # tmpfs mounts to create by default
-DEFAULT_TMPFS_MOUNTS=(
+declare -r DEFAULT_TMPFS_MOUNTS=(
 	/tmp
 	/run
 )
 
 # default name of the control group to use
-DEFAULT_CGROUP_NAME="chroot-wrapper"
+declare -r DEFAULT_CGROUP_NAME="chroot-wrapper"
 
 # cgroup controllers to enable (if supported)
-DEFAULT_CGROUP_CONTROLLERS=(
-	cpu
-	blkio
-	cpuacct
-	memory
-)
+declare -r DEFAULT_CGROUP_CONTROLLERS=()
+
+# default path to the config file
+declare -r CONFIG_FILE="/etc/chroot-wrapper/config.bash"
 
 show_usage() {
 	cat <<EOF
@@ -105,6 +103,7 @@ parse_args() {
 	local -A longoptions=(
 		[bind-mount:]=b
 		[cgroup:]=c
+		[config:]=C
 		[env:]=e
 		[extra-namespace:]=E
 		[extra-unshare-arg:]=u
@@ -147,6 +146,7 @@ parse_args() {
 				shift
 			;;
 			--cgroup|-c) cgroup_name="${2}"; shift;;
+			--config|-C) config_file="${2}"; shift;;
 			--env|-e) env_vars+=("${2}"); shift;;
 			--extra-namespace|-E) extra_namespaces+=("${2}"); shift;;
 			--extra-unshare-arg|-u) extra_unshare_args+=("${2}"); shift;;
@@ -210,6 +210,12 @@ parse_args() {
 	elif [[ ! -d ${chroot_path} ]]; then
 		printf '%s: Provided path "%s" does not exist\n' "${progname}" "${chroot_path}" >&2
 		return 1
+	fi
+}
+
+source_config_file() {
+	if [[ -r ${config_file:=${CONFIG_FILE}} ]]; then
+		source "${config_file}" || return
 	fi
 }
 
@@ -567,12 +573,13 @@ main() {
 	shopt -so pipefail
 
 	# these get set in parse_args
-	local chroot_path hostname cgroup_name keepenv shellopts
+	local chroot_path hostname cgroup_name keepenv shellopts config_file
 	local -a subcommand 
 	local -a env_vars extra_namespaces extra_unshare_args tmpfs
 	local -A bind_mounts omit_namespaces
 
 	parse_args "${@}" || return
+	source_config_file || return
 
 	local unshare
 	local -A namespaces
