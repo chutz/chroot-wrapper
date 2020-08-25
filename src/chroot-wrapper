@@ -597,7 +597,9 @@ main() {
 	local -A mounts tmpfs_mounts
 	initialize_mounts || return
 
-	setup_cgroups || return
+	if ! setup_cgroups; then
+		printf 'WARNING: Setting up cgroups failed, continuing\n' >&2
+	fi
 	setup_mounts || return
 	setup_misc || return
 	run_chroot || return
