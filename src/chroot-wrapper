@@ -69,6 +69,8 @@ Process is run in separate namespaces: ${DEFAULT_NAMESPACES[*]}
 
   -c --cgroup <NAME>            The name of the control group to use.
 
+  -C --config <PATH>            Specify a path to a different config file.
+
   -e --env <NAME>               Forward environment variable NAME.
 
   -n --extra-namespace <NAME>   Create a new namespace of the given type in
@@ -214,8 +216,10 @@ parse_args() {
 }
 
 source_config_file() {
-	if [[ -r ${config_file:=${CONFIG_FILE}} ]]; then
-		source "${config_file}" || return
+	# always try to source config from args, but default only if it's readable
+	if [[ -n ${config_file} || -r ${CONFIG_FILE} ]]; then
+		# shellcheck disable=SC1090
+		source "${config_file:=${CONFIG_FILE}}" || return
 	fi
 }
 
@@ -236,8 +240,6 @@ parse_namespaces() {
 	# we always want these namespaces
 	namespace_list=("${FORCE_NAMESPACES[@]}")
 
-	# shellcheck disable=SC2153
-	# NAMESPACES is expected to be set in the config file
 	if [[ -n ${NAMESPACES[*]} ]]; then
 		namespace_list+=("${NAMESPACES[@]}")
 	else
@@ -343,8 +345,6 @@ initialize_mounts() {
 		mounts[${mount}]=${bind_mounts[${mount}]}
 	done
 
-	# shellcheck disable=SC2153
-	# expected to come from config file
 	if [[ -n ${TMPFS_MOUNTS[*]} ]]; then
 		for mount in "${TMPFS_MOUNTS[@]}"; do
 			tmpfs_mounts["${mount}"]=1
@@ -476,8 +476,6 @@ setup_cgroups() {
 	printf '%s\n' "$$" > "${cgroup_path}/cgroup.procs" || return
 
 	local -a cgroup_controllers
-	# shellcheck disable=SC2153
-	# expected to come from env or config file
 	if [[ -n ${CGROUP_CONTROLLERS[*]} ]]; then
 		cgroup_controllers=("${CGROUP_CONTROLLERS[@]}")
 	else
@@ -584,7 +582,9 @@ main() {
 
 	parse_args "${@}" || return
 
+	local CGROUP_NAME
 	local -A EXTRA_MOUNTS
+	local -a TMPFS_MOUNTS CGROUP_CONTROLLERS NAMESPACES
 	source_config_file || return
 
 	local unshare
