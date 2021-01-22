@@ -85,6 +85,13 @@ Process is run in separate namespaces: ${DEFAULT_NAMESPACES[*]}
                                 be ignored if uts namespaces are not
                                 supported.
 
+  -N --no-move-root             Don't replace the root mount of the namespace
+                                before chrooting.
+                                By default "mount --move" is used to make the
+                                chroot path the root of the new namespace. This
+                                skips that step and just chroots the process
+                                as usual.
+
   -k --keepenv                  Keep the environment of the calling process.
                                 Without this option, the environment will be
                                 discarded.
@@ -112,6 +119,7 @@ parse_args() {
 		[help]=h
 		[hostname:]=n
 		[keepenv]=k
+		[no-move-root]=N
 		[omit-namespace:]=o
 		[shellopts]=s
 		[tmpfs:]=t
@@ -170,6 +178,7 @@ parse_args() {
 				shift
 			;;
 			--keepenv|-k) keepenv=1;;
+			--no-move-root|-N) no_move_root=1;;
 			--omit-namespace|-o)
 				if [[ ${2} == mount ]]; then
 					printf '%s: Mount namespace cannot be omitted\n' "${progname}" >&2
@@ -564,6 +573,10 @@ run_chroot() {
 	# if no command provided, run a login shell
 	[[ -z ${subcommand[*]} ]] && subcommand=("${shell}" -l)
 
+	if [[ -z ${no_move_root} ]]; then
+		mount --move "${chroot_path}" / || return
+		chroot_path="/"
+	fi
 	exec "${chroot_cmd[@]}" "${chroot_path}" "${env_command[@]}" "${subcommand[@]}"
 }
 
@@ -575,7 +588,7 @@ main() {
 	shopt -so pipefail
 
 	# these get set in parse_args
-	local chroot_path hostname cgroup_name keepenv shellopts config_file
+	local chroot_path hostname cgroup_name keepenv shellopts config_file no_move_root
 	local -a subcommand
 	local -a env_vars extra_namespaces extra_unshare_args tmpfs
 	local -A bind_mounts omit_namespaces
