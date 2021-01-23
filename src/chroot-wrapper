@@ -573,7 +573,7 @@ run_chroot() {
 	# if no command provided, run a login shell
 	[[ -z ${subcommand[*]} ]] && subcommand=("${shell}" -l)
 
-	if [[ -z ${no_move_root} ]]; then
+	if [[ -z ${no_move_root} ]] && mountpoint --quiet "${chroot_path}"; then
 		mount --move "${chroot_path}" / || return
 		chroot_path="/"
 	fi
