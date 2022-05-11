@@ -38,7 +38,7 @@ declare -rA DEFAULT_MOUNTS=(
 
 # tmpfs mounts to create by default
 declare -r DEFAULT_TMPFS_MOUNTS=(
-	/tmp
+	/tmp:1777
 	/run
 )
 
@@ -299,7 +299,7 @@ call_unshare() {
 initialize_mounts() {
 	# initialize the bind_mounts associate array with the "default" mounts
 	# list that comes from a config file, or the environment
-	local mounts_type mount
+	local mounts_type mount mode
 
 	# shellcheck disable=SC2153
 	# expected to come from env or config file
@@ -347,17 +347,20 @@ initialize_mounts() {
 
 	if [[ -n ${TMPFS_MOUNTS[*]} ]]; then
 		for mount in "${TMPFS_MOUNTS[@]}"; do
-			tmpfs_mounts["${mount}"]=1
+			mode=${mount#*:}
+			tmpfs_mounts["${mount%%:*}"]=${mode:-1}
 		done
 	else
 		for mount in "${DEFAULT_TMPFS_MOUNTS[@]}"; do
-			tmpfs_mounts["${mount}"]=1
+			mode=${mount#*:}
+			tmpfs_mounts["${mount%%:*}"]=${mode:-1}
 		done
 	fi
 
 	# passed on command line
 	for mount in "${tmpfs[@]}"; do
-		tmpfs_mounts[${mount}]=1
+		mode=${mount#*:}
+		tmpfs_mounts["${mount%%:*}"]=${mode:-1}
 	done
 
 	# if we are mounting over the SSH_AUTH_SOCK path, then bind mount it's
@@ -391,9 +394,18 @@ setup_mounts() {
 	"${mount_cmd}" --make-rprivate / || return
 
 	# do tmpfs mounts first
-	local target
+	local target mode
 	for target in "${!tmpfs_mounts[@]}"; do
-		"${mount_cmd}" -t tmpfs none "${chroot_path}${target}" || return
+		mode=${tmpfs_mounts[${target}]}
+
+		if [[ ${mode} != "${target}" && ${mode} =~ [0-9]{3,4} ]]; then
+			mode="-o mode=${mode}"
+		else
+			mode="-o mode=0755"
+		fi
+
+		# shellcheck disable=SC2086
+		"${mount_cmd}" -t tmpfs ${mode} none "${chroot_path}${target}" || return
 	done
 
 	local source_path
@@ -423,7 +435,7 @@ setup_mounts() {
 		if [[ ! -e ${target} ]]; then
 			# if the target doesn't exist, and it's path is under a tmpfs mount
 			# then create it, otherwise bomb
-			local tmpfs in_tmpfs target_path=${target#${chroot_path}}
+			local tmpfs in_tmpfs target_path=${target#"${chroot_path}"}
 
 			for tmpfs in "${!tmpfs_mounts[@]}"; do
 				in_tmpfs=1
@@ -575,7 +587,7 @@ main() {
 	shopt -so pipefail
 
 	# these get set in parse_args
-	local chroot_path hostname cgroup_name keepenv shellopts config_file no_move_root
+	local chroot_path hostname cgroup_name keepenv shellopts config_file
 	local -a subcommand
 	local -a env_vars extra_namespaces extra_unshare_args tmpfs
 	local -A bind_mounts omit_namespaces
