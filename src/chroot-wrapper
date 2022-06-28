@@ -548,7 +548,7 @@ run_chroot() {
 
 	local chroot_cmd
 	if ! chroot_cmd+=("$(command -pv chroot)"); then
-		printf '%s: Could not find chroot command, aborting\n' "${progname}" > %2
+		printf '%s: Could not find chroot command, aborting\n' "${progname}" >&2
 		return 1
 	fi
 
