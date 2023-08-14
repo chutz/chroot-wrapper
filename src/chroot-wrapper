@@ -442,8 +442,8 @@ setup_mounts() {
 				if [[ ${target_path} == ${tmpfs%/}/* ]]; then
 					if [[ -d ${source_path} ]]; then
 						mkdir -p "${target}" || return
-					elif [[ -f ${source_path} ]]; then
-						mkdir -p "${target%%/*}" || return
+					elif [[ -f ${source_path} || -S ${source_path} ]]; then
+						mkdir -p "${target%/*}" || return
 						touch "${target}" || return
 					else
 						printf '%s: Source path object type "%s" cannout be bind mounted\n' \
