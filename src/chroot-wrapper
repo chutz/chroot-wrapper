@@ -576,6 +576,7 @@ run_chroot() {
 	# if no command provided, run a login shell
 	[[ -z ${subcommand[*]} ]] && subcommand=("${shell}" -l)
 
+	mount --rbind "${chroot_path}" "${chroot_path}" || return
 	exec "${chroot_cmd[@]}" "${chroot_path}" "${env_command[@]}" "${subcommand[@]}"
 }
 
