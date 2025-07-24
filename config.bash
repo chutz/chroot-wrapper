@@ -2,7 +2,7 @@
 #NAMESPACES=( uts ipc cgroup )
 
 # the paths to bind mount from the host
-# this is a bach associative array, the key is the path on the host, the
+# this is a bash associative array, the key is the path on the host, the
 # value is the path in the chroot (blank means the same as the host) then
 # a colon and any mount options to pass
 # this *replaces* the default list
